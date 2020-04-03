@@ -1,0 +1,17 @@
+#!/bin/bash
+export AWS_ACCESS_KEY_ID='{{ AWS_ACCESS_KEY_ID }}'
+export AWS_SECRET_ACCESS_KEY='{{AWS_SECRET_ACCESS_KEY }}'
+export AWS_DEFAULT_REGION='{{ AWS_DEFAULT_REGION }}'
+STACK_NAME='{{ STACK_NAME }}'
+TARGET='KJG-VPNTarget'
+
+CURRENT_TARGET=`aws cloudformation list-exports --query "Exports[?Name=='${TARGET}'].Value" --output text`
+NEW_TARGET=`curl -4 ifconfig.me`
+
+if [[ "${CURRENT_TARGET}" = "${NEW_TARGET}" ]]; then
+  logger -is -t ROUTEUPDATE "$(date) IP hasn't changed, no update required"
+  exit 0
+else
+  logger -is -t ROUTEUPDATE "$(date) IP has changed, updating route"
+  aws cloudformation update-stack --stack-name ${STACK_NAME} --use-previous-template --parameters "ParameterKey=RouteTarget,ParameterValue=${NEW_TARGET}"
+fi

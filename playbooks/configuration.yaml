@@ -1,0 +1,127 @@
+---
+- hosts: all
+  tasks:
+    - name: Expand Root File System
+      command: "/usr/bin/rootfs-expand"
+      ignore_errors: yes
+    - name: Configure Hostname
+      hostname:
+        name: "{{ inventory_hostname }}"
+    - name: Configure Timezone
+      timezone:
+        name: "{{ linux_timezone }}"
+    - name: Updating the operating system
+      yum:
+        name: '*'
+        state: latest
+    - name: Adding the epel repo for ARM
+      blockinfile:
+        path: /etc/yum.repos.d/epel-unsigned.repo
+        create: yes
+        block: |
+          [epel]
+          name=Epel rebuild for armhfp
+          baseurl=https://armv7.dev.centos.org/repodir/epel-pass-1/
+          enabled=1
+          gpgcheck=0
+    - name: A few more yum installations
+      yum:
+        name:
+          - unzip
+          - python-pip
+          - make
+          - tree
+          - rsync
+    - name: Install pip packages
+      pip:
+        name: awscli
+    - name: Upgrade pip
+      pip:
+        name: pip
+        extra_args: --upgrade
+    - name: Set the ssh login banner
+      template:
+        src: files/motd
+        dest: /etc/motd
+        owner: root
+        group: root
+        mode: 0644
+    - name: Modify SSH configurations 1
+      replace:
+        path: /etc/ssh/sshd_config
+        backup: yes
+        regexp: "#PermitRootLogin yes"
+        replace: "PermitRootLogin no"
+    - name: Modify SSH configurations 2
+      replace:
+        path: /etc/ssh/sshd_config
+        regexp: "#PubkeyAuthentication yes"
+        replace: "PubkeyAuthentication yes"
+    - name: Modify SSH configurations 3
+      replace:
+        path: /etc/ssh/sshd_config
+        regexp: "PasswordAuthentication yes"
+        replace: "PasswordAuthentication no"
+    - name: Modify SSH configurations 4
+      replace:
+        path: /etc/ssh/sshd_config
+        regexp: "#AllowAgentForwarding yes"
+        replace: "AllowAgentForwarding yes"
+    - name: Modify SSH configurations 5
+      replace:
+        path: /etc/ssh/sshd_config
+        regexp: "#AllowTcpForwarding yes"
+        replace: "AllowTcpForwarding yes"
+    - name: Modify SSH configurations 6
+      replace:
+        path: /etc/ssh/sshd_config
+        regexp: "#PermitTTY yes"
+        replace: "PermitTTY yes"
+    - name: Modify SSH configurations 7
+      replace:
+        path: /etc/ssh/sshd_config
+        regexp: "#TCPKeepAlive yes"
+        replace: "TCPKeepAlive yes"
+    - name: Modify SSH configurations 8
+      replace:
+        path: /etc/ssh/sshd_config
+        regexp: "#PermitTunnel no"
+        replace: "PermitTunnel yes"
+    - name: Configure hosts.allow
+      blockinfile:
+        path: /etc/hosts.allow
+        block: |
+          sshd: localhost : allow
+          sshd: 192.168.1 : allow
+          sshd: 192.168.100 : allow
+    - name: Restart SSHD
+      systemd:
+        state: restarted
+        name: sshd
+    - name: Add a firewall rule
+      firewalld:
+        zone: public
+        state: enabled
+        permanent: yes
+        service: ssh
+    - name: Turn wifi off
+      command: nmcli radio wifi off
+    - name: Harden out root user
+      user:
+        name: root
+        password_lock: yes
+    - name: Adjust POE hat fan
+      template:
+        src: files/poe_fan
+        dest: /boot/config.txt
+        owner: root
+        group: root
+        mode: 0644
+      register: poe_fan
+    - name: Make sure clock steps after restart
+      lineinfile:
+        path: /etc/rc.d/rc.local
+        line: chronyc -a makestep
+    # - name: Reboot for dtoverlay loading
+    #   reboot:
+    #   when: poe_fan.changed

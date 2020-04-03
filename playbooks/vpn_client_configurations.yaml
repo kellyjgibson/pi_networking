@@ -1,0 +1,115 @@
+---
+- hosts:  vpn
+  tasks:
+    - name: Retreive Certificate Authority
+      fetch:
+        dest: "{{ VPN_CONFIGURATION_LOCATION }}"
+        fail_on_missing: yes
+        flat: yes
+        src: "{{ DIR_OVPN }}/ca.crt"
+      when: not lookup('file', '{{ VPN_CONFIGURATION_LOCATION }}ca.crt')
+    - name: Retreive TLS Auth Key
+      fetch:
+        dest: "{{ VPN_CONFIGURATION_LOCATION }}"
+        fail_on_missing: yes
+        flat: yes
+        src: "{{ DIR_OVPN }}/ta.key"
+      when: not lookup('file', '{{ VPN_CONFIGURATION_LOCATION }}ta.key')
+    - name: Create Client Configs Directory
+      vars:
+        ansible_become: no
+      local_action:
+        module: file
+        path: files/configs/
+        state: directory
+    - name: Checking for existing configs
+      vars:
+        ansible_become: no
+      local_action:
+        module: stat
+        path: "files/configs/{{ item }}.ovpn"
+      register: local_files
+      with_items: "{{ MAKE_THESE_CERTS }}"
+    - debug:
+        msg: "The following configurations will be made: {{ item.item }}"
+      with_items: "{{ local_files.results }}"
+      when: item.stat.exists == False
+    - name: Build the client configs
+      command:
+        chdir: "{{ DIR_RSA }}"
+        cmd: "./easyrsa --batch build-client-full {{ item.item }} nopass"
+      with_items: "{{ local_files.results }}"
+      when: item.stat.exists == False
+    - name: Retreive Certificate
+      fetch:
+        dest: "{{ VPN_CONFIGURATION_LOCATION }}"
+        fail_on_missing: yes
+        flat: yes
+        src: "{{ DIR_RSA }}/pki/issued/{{ item.item }}.crt"
+      with_items: "{{ local_files.results }}"
+      when: item.stat.exists == False
+    - name: Retreive Key
+      fetch:
+        dest: "{{ VPN_CONFIGURATION_LOCATION }}"
+        fail_on_missing: yes
+        flat: yes
+        src: "{{ DIR_RSA }}/pki/private/{{ item.item }}.key"
+      with_items: "{{ local_files.results }}"
+      when: item.stat.exists == False
+    - name: Create Config files
+      vars:
+        ansible_become: no
+      template:
+        src: openvpn_client_configs.j2
+        dest: files/configs/{{ item.item }}.ovpn
+      delegate_to: localhost
+      with_items: "{{ local_files.results }}"
+      when: item.stat.exists == False
+    - name: Insert ca.crt into Files
+      vars:
+        ansible_become: no
+      local_action:
+        module: blockinfile
+        path: files/configs/{{ item.item }}.ovpn
+        block: |
+          {{ lookup('file', '{{ VPN_CONFIGURATION_LOCATION }}ca.crt') }}
+        marker: "# {mark} ANSIBLE MANAGED BLOCK ca.crt"
+        insertafter: "<ca>"
+      with_items: "{{ local_files.results }}"
+      when: item.stat.exists == False
+    - name: Insert cert into Files
+      vars:
+        ansible_become: no
+      local_action:
+        module: blockinfile
+        path: files/configs/{{ item.item }}.ovpn
+        block: |
+          {{ lookup('file', '{{ VPN_CONFIGURATION_LOCATION }}{{ item.item }}.crt') }}
+        marker: "# {mark} ANSIBLE MANAGED BLOCK {{item}}.crt"
+        insertafter: "<cert>"
+      with_items: "{{ local_files.results }}"
+      when: item.stat.exists == False
+    - name: Insert key.pem into Files
+      vars:
+        ansible_become: no
+      local_action:
+        module: blockinfile
+        path: files/configs/{{ item.item }}.ovpn
+        block: |
+          {{ lookup('file', '{{ VPN_CONFIGURATION_LOCATION }}{{ item.item }}.key') }}
+        marker: "# {mark} ANSIBLE MANAGED BLOCK key.pem"
+        insertafter: "<key>"
+      with_items: "{{ local_files.results }}"
+      when: item.stat.exists == False
+    - name: Insert tls-auth into Files
+      vars:
+        ansible_become: no
+      local_action:
+        module: blockinfile
+        path: files/configs/{{ item.item }}.ovpn
+        block: |
+          {{ lookup('file', '{{ VPN_CONFIGURATION_LOCATION }}ta.key') }}
+        marker: "# {mark} ANSIBLE MANAGED BLOCK ta.key"
+        insertafter: "<tls-auth>"
+      with_items: "{{ local_files.results }}"
+      when: item.stat.exists == False

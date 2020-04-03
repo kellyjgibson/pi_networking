@@ -1,0 +1,88 @@
+---
+- hosts: pihole
+  vars:
+    pi_hole_path: /etc/pihole
+    cloudflared_path: /usr/local/bin
+  tasks:
+    - name: Create PiHole installation directory
+      file:
+        path: "{{ pi_hole_path }}"
+        state: directory
+    - name: Create PiHole Setup Vars
+      template:
+        src: pihole.j2
+        dest: "{{ pi_hole_path }}/setupVars.conf"
+      register: pihole_config
+    - stat:
+        path: /usr/local/bin/pihole
+      register: pihole_binary
+    - set_fact:
+        pihole_installed: "{{ pihole_binary.stat.exists | default(false) }}"
+    - name: Download PiHole Installation
+      get_url:
+        url: https://install.pi-hole.net
+        dest: ~/basic-install.sh
+        mode: 0744
+      when: not pihole_installed
+    - name: Set SELinux to Permissive
+      shell: setenforce permissive
+      when: not pihole_installed
+    - name: run install script
+      shell: ~/basic-install.sh --unattended
+      when: not pihole_installed
+    - name: Set SELinux to Enforcing
+      shell: setenforce enforcing
+      when: not pihole_installed
+    - name: Add a firewall rule
+      firewalld:
+        zone: public
+        state: enabled
+        permanent: yes
+        service: dns
+    - name: Add CloudFlared user
+      user:
+        create_home: no
+        name: cloudflared
+        shell: /bin/nologin
+        system: true
+    - stat:
+        path: "{{ cloudflared_path }}/cloudflared"
+      register: cloudflared_binary
+    - set_fact:
+        cloudflared_installed: "{{ cloudflared_binary.stat.exists | default(false) }}"
+    - name: Download cloudflared
+      get_url:
+        url: https://bin.equinox.io/c/VdrWdbjqyF/cloudflared-stable-linux-arm.tgz
+        dest: ~/cloudflared-stable-linux-arm.tgz
+        mode: 0644
+      when: not cloudflared_installed
+    - name: Unpack cloudflared
+      unarchive:
+        src: ~/cloudflared-stable-linux-arm.tgz
+        dest: "{{ cloudflared_path }}"
+        remote_src: yes
+        mode: 0744
+        owner: cloudflared
+        group: cloudflared
+      when: not cloudflared_installed
+    - name: Check Cloudflared version
+      shell: "{{ cloudflared_path }}/cloudflared -v"
+      register: cloudflared_version
+    - debug: var=cloudflared_version.stdout_lines
+    - name: Add cloudflared commandline arguments
+      lineinfile:
+        path: /etc/default/cloudflared
+        create: yes
+        owner: cloudflared
+        group: cloudflared
+        mode: 0644
+        line: "CLOUDFLARED_OPTS=--port 5053 --upstream https://1.1.1.1/dns-query --upstream https://1.0.0.1/dns-query"
+    - name: Create systemd script
+      template:
+        src: cloudflared_systemd.j2
+        dest: /etc/systemd/system/cloudflared.service
+    - name: Enable/Start cloudflared service
+      service:
+        enabled: yes
+        name: cloudflared
+        state: started

@@ -1,0 +1,51 @@
+---
+- hosts: all
+  tasks:
+    - name: Add users
+      user:
+        create_home: yes
+        groups: wheel
+        name: "{{ item.user_name }}"
+      with_items: "{{ user_list }}"
+    - name: Set authorized keys
+      authorized_key:
+        key: "{{ item.user_key }}"
+        manage_dir: yes
+        user: "{{ item.user_name }}"
+      with_items: "{{ user_list }}"
+    - name: sudo without password for wheel group
+      copy:
+        content: '%wheel ALL=(ALL:ALL) NOPASSWD:ALL'
+        dest: /etc/sudoers.d/wheel_nopasswd
+        mode: 0440
+    - name: Add user Bash Profile
+      blockinfile:
+        path: "/home/{{ item }}/.bash_profile"
+        create: yes
+        owner: "{{ item.user_name }}"
+        block: |
+          ###ALIASES
+          alias ll="ls -latr"
+          alias ..="cd .."
+          alias ...='cd ../..'
+          alias ....='cd ../../..'
+          ls --color=always
+          export LS_COLORS='rs=0:di=01;34:ln=01;36:mh=00:pi=40;33'
+          PATH=$PATH:$HOME/bin:/usr/bin/
+          export PATH
+      with_items: "{{ user_list }}"
+    - name: Add root Bash Profile
+      blockinfile:
+        path: /root/.bash_profile
+        create: yes
+        owner: root
+        block: |
+          ###ALIASES
+          alias ll="ls -latr"
+          alias ..="cd .."
+          alias ...='cd ../..'
+          alias ....='cd ../../..'
+          ls --color=always
+          export LS_COLORS='rs=0:di=01;34:ln=01;36:mh=00:pi=40;33'
+          PATH=$PATH:$HOME/bin:/usr/bin/
+          export PATH

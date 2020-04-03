@@ -1,0 +1,268 @@
+---
+- hosts:  vpn
+  tasks:
+    - name: Install OpenVNP Packages
+      package:
+        name:
+          - openvpn
+          - easy-rsa
+          - rsync
+        state: present
+    - name: Install AWSCLI
+      pip:
+        name: awscli
+        extra_args: --upgrade
+    - name:  Create OpenVPN keys directory
+      file:
+        path: "{{ DIR_RSA }}/keys"
+        state: directory
+    - name: Copy over files 1
+      synchronize:
+        src: /usr/share/easy-rsa/3.0/
+        dest: "{{ DIR_RSA }}"
+        links: yes
+      delegate_to: "{{ inventory_hostname }}"
+    - name: Copy over files 2
+      copy:
+        src: "{{ DIR_RSA }}/openssl-easyrsa.cnf"
+        dest: "{{ DIR_RSA }}/openssl.cnf"
+        remote_src: yes
+    - name: Template configuration
+      template:
+        src: vars.j2
+        dest: "{{ DIR_RSA }}/vars"
+        owner: root
+        group: root
+        mode: 0644
+    - name: Made CCD Directory
+      file:
+        path: "{{ DIR_OVPN }}/ccd"
+        state: directory
+    - name: Template server configuration
+      template:
+        src: server1.j2
+        dest: "{{ DIR_OVPN }}/server1.conf"
+        owner: root
+        group: root
+        mode: 0644
+    - stat:
+        path: "{{ DIR_RSA }}/pki"
+      register: pki_exists
+    - set_fact:
+        rsa_pki_exists: "{{ pki_exists.stat.exists | default(false) }}"
+    - name: Initialize easyrsa
+      command:
+        chdir: "{{ DIR_RSA }}"
+        cmd: "./easyrsa init-pki"
+      when: not rsa_pki_exists
+    - stat:
+        path: "{{ DIR_RSA }}/pki/private/ca.key"
+      register: ca_exists
+    - set_fact:
+        rsa_ca_exists: "{{ ca_exists.stat.exists | default(false) }}"
+    - name: Build Certificate Authority
+      command:
+        chdir: "{{ DIR_RSA }}"
+        cmd: "./easyrsa --vars={{ DIR_RSA }}/vars --batch build-ca nopass"
+      when: not rsa_ca_exists
+    - name: Generate Req
+      command:
+        chdir: "{{ DIR_RSA }}"
+        cmd: "./easyrsa --batch --req-cn={{ SERVER }} gen-req {{ SERVER }}.{{ TLD }} nopass"
+    - name: Copy ca.crt
+      copy:
+        src: "{{ DIR_RSA }}/pki/ca.crt"
+        dest: "{{ DIR_OVPN }}/ca.crt"
+        remote_src: yes
+    - name: Copy reqs
+      copy:
+        src: "{{ DIR_RSA }}/pki/reqs/{{ SERVER }}.{{ TLD }}.req"
+        dest: "{{ DIR_OVPN }}/{{ SERVER }}.{{ TLD }}.req"
+        remote_src: yes
+    - name: Copy keys
+      copy:
+        src: "{{ DIR_RSA }}/pki/private/{{ SERVER }}.{{ TLD }}.key"
+        dest: "{{ DIR_OVPN }}/{{ SERVER }}.{{ TLD }}.key"
+        remote_src: yes
+    - name: Sign requests
+      command:
+        chdir: "{{ DIR_RSA }}"
+        cmd: "./easyrsa --batch sign-req server {{ SERVER }}.{{ TLD }}"
+    - stat:
+        path: "{{ DIR_RSA }}/pki/dh.pem"
+      register: dh_exists
+    - set_fact:
+        dh_exists: "{{ dh_exists.stat.exists | default(false) }}"
+    - name: Generate Diffe-Hellman Parameters (This Will Take Some Time)
+      command:
+        chdir: "{{ DIR_RSA }}"
+        cmd: "./easyrsa --batch gen-dh"
+      when: not dh_exists
+    - stat:
+        path: "{{ DIR_RSA }}/pki/private/client1.key"
+      register: client1_exists
+    - set_fact:
+        client1_exists: "{{ client1_exists.stat.exists | default(false) }}"
+    - name: Build the first client
+      command:
+        chdir: "{{ DIR_RSA }}"
+        cmd: "./easyrsa --batch build-client-full client1 nopass"
+      when: not client1_exists
+    - stat:
+        path: "{{ DIR_OVPN }}/ta.key"
+      register: ta_exists
+    - set_fact:
+        ta_exists: "{{ ta_exists.stat.exists | default(false) }}"
+    - name: Generate ta.key
+      command:
+        chdir: "{{ DIR_RSA }}"
+        cmd: "openvpn --genkey --secret {{ DIR_OVPN }}/ta.key"
+      when: not ta_exists
+    - name: Copy DH key
+      copy:
+        src: "{{ DIR_RSA }}/pki/dh.pem"
+        dest: "{{ DIR_OVPN }}"
+        remote_src: yes
+    - stat:
+        path: "{{ DIR_OVPN }}/pki/crl.pem"
+      register: crl_exists
+    - set_fact:
+        crl_exists: " {{ crl_exists.stat.exists | default(false) }}"
+    - name: Generate Certificate Revocation List
+      command:
+        chdir: "{{ DIR_RSA }}"
+        cmd: "./easyrsa gen-crl"
+      when: not crl_exists
+    - name: Copy Signed Cert
+      copy:
+        src: "{{ DIR_RSA }}/pki/issued/{{ SERVER }}.{{ TLD }}.crt"
+        dest: "{{ DIR_OVPN }}"
+        remote_src: yes
+    - name: Start Server
+      systemd:
+        enabled: yes
+        state: started
+        name: openvpn@server1
+    - name: Kernel Parameters - ipv4 forwarding
+      sysctl:
+        name: net.ipv4.ip_forward
+        value: '1'
+        sysctl_set: yes
+        state: present
+        reload: yes
+    - name: Restart networking
+      systemd:
+        name: network.service
+        state: restarted
+    - name: Firewall Changes - add openvpn service
+      firewalld:
+        service: openvpn
+        permanent: yes
+        state: enabled
+    - name: Firewall changes - add masquerade
+      firewalld:
+        masquerade: yes
+        state: enabled
+        permanent: yes
+    - name: Firewall Changes - add port
+      firewalld:
+        port: "{{ PORT }}/udp"
+        zone: public
+        state: enabled
+        permanent: yes
+    - name: Restart Firewalld
+      systemd:
+        state: restarted
+        name: firewalld
+    - name: Install Fail2Ban
+      package:
+        name:
+          - fail2ban
+          - fail2ban-systemd
+        state: present
+    - name: Update SELinux Policies
+      yum:
+        name: 'selinux-policy*'
+        state: present
+    - name: Copy jail configs
+      copy:
+        src: /etc/fail2ban/jail.conf
+        dest: /etc/fail2ban/jail.local
+        remote_src: yes
+    - name: Template out F2B sshdconf
+      template:
+        src: files/sshd.local
+        dest: /etc/fail2ban/jail.d/sshd.local
+    - name: Template F2B Filter
+      template:
+        src: files/openvpn.conf
+        dest: /etc/fail2ban/filter.d/openvpn.conf
+    - name: Template F2B OpenVPN Jail
+      template:
+        src: templateS/openvpn
+        dest: /etc/fail2ban/jail.d/openvpn
+    - name: Start/Enable Fail2Ban
+      systemd:
+        enabled: yes
+        state: started
+        name: fail2ban
+    - name: Template out route updater cron
+      template:
+        src: update_vpn_route.j2
+        dest: /etc/cron.hourly/update_vpn_route.sh
+        mode: 0700
+        owner: root
+        group: root
+    - name: Retreive Certificate Authority
+      fetch:
+        dest: "{{ VPN_CONFIGURATION_LOCATION }}"
+        fail_on_missing: yes
+        flat: yes
+        src: "{{ DIR_OVPN }}/ca.crt"
+    - name: Retreive Certificate
+      fetch:
+        dest: "{{ VPN_CONFIGURATION_LOCATION }}"
+        fail_on_missing: yes
+        flat: yes
+        src: "{{ DIR_RSA }}/pki/issued/client1.crt"
+    - name: Retreive Key
+      fetch:
+        dest: "{{ VPN_CONFIGURATION_LOCATION }}"
+        fail_on_missing: yes
+        flat: yes
+        src: "{{ DIR_RSA }}/pki/private/client1.key"
+    - name: Retreive TLS Auth Key
+      fetch:
+        dest: "{{ VPN_CONFIGURATION_LOCATION }}"
+        fail_on_missing: yes
+        flat: yes
+        src: "{{ DIR_OVPN }}/ta.key"
+    - name: Create Client Configs Directory
+      vars:
+        ansible_become: no
+      local_action:
+        module: file
+        path: files/configs/
+        state: directory
+    - name: Create Client1 Config
+      vars:
+        ansible_become: no
+      template:
+        src: openvpn_client_configs.j2
+        dest: files/configs/client1.ovpn
+      delegate_to: localhost
+    - name: Insert Secrets into File
+      vars:
+        ansible_become: no
+      local_action:
+        module: blockinfile
+        path: files/configs/client1.ovpn
+        block: |
+          {{ item.block }}
+        marker: "# {mark} ANSIBLE MANAGED BLOCK {{ item.name }}"
+        insertafter: "{{ item.regex }}"
+      with_items:
+        - { block: "{{ lookup('file', '{{ VPN_CONFIGURATION_LOCATION }}ca.crt') }}", regex: "<ca>", name: "ca" }
+        - { block: "{{ lookup('file', '{{ VPN_CONFIGURATION_LOCATION }}client1.crt') }}", regex: "<cert>", name: "cert" }
+        - { block: "{{ lookup('file', '{{ VPN_CONFIGURATION_LOCATION }}client1.key') }}", regex: "<key>", name: "key" }
+        - { block: "{{ lookup('file', '{{ VPN_CONFIGURATION_LOCATION }}ta.key') }}", regex: "<tls-auth>", name: "ta" }

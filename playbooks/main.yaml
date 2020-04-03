@@ -1,0 +1,6 @@
+---
+- import_playbook: configuration.yaml
+- import_playbook: users.yaml
+- import_playbook: pihole.yaml
+- import_playbook: vpn.yaml
+- import_playbook: vpn_client_configurations.yaml

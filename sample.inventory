@@ -1,0 +1,47 @@
+# <<<YOUR NETWORK NAME >>>
+
+[pihole]
+hostnamey ansible_host=192.168.x.y
+
+[vpn]
+hostnamex ansible_host=192.168.x.x
+
+[all:vars]
+ansible_connection=ssh
+ansible_user=<<<your user name>>>
+ansible_become=yes
+ansible_sudo_pass=<<<sudo pass if passwordless sudo not enabled>>>
+
+#################
+#User Names and SSH Keys Below
+user_list=[{ 'user_name': 'user1', 'user_key': 'user1key'},{'user_name': 'user2','user_key': 'user2key'}]
+
+#################
+#System Configuration Items Below
+linux_timezone='America/Denver'
+
+################
+#Pihole Configuration Items Below
+WEBPASSWORD='' #password for the web client `echo -n P@ssw0rd | sha256sum | awk '{printf "%s",$1 }' | sha256sum` 
+
+#################
+DIR_OVPN='/etc/openvpn' #Location of ovpn on rpi - probably don't change this
+DIR_RSA="{{ DIR_OVPN }}/easy-rsa" #Location of easy-rsa on remote machine - probably don't change this
+SERVER='<<<SUB-DOMAIN USER NAME>>>'
+TLD='<<<YOUR TOP LEVEL DOMAIN>>>'
+COUNTRY='<<<COUNTRY>>>'
+PROVINCE='<<<STATE>>>'
+CITY='<<<CITY>>>'
+EMAIL='<<<EMAIL>>>'
+OU='<<<ORGANIZATIONAL UNIT OR NAME>>>'
+SUBNET='<<<SUBNET>>>' #note, update the configuration for ssh in configuration.yaml playbook too - sorry
+MASK='<<<MASK FOR # OF SIMULTANEOUS CLIENTS TO ALLOW>>>'
+PORT='<<<PORT VPN RUNS ON>>>'
+DNS='<<<YOUR NETWORK DNS ADDRESS>>>'
+VPN_CONFIGURATION_LOCATION='./VPNConfigs/'  #Local path where config files are dropped
+AWS_ACCESS_KEY_ID='<<<AWS ACCESS KEY FROM CLOUDFORMATION>>>'
+AWS_SECRET_ACCESS_KEY='<<<AWS SECRET ACCESS KEY FROM CLOUDFORMATION>>>'
+AWS_DEFAULT_REGION='<<<REGION WHERE CF IS DEPLOYED>>>'
+STACK_NAME='<<<STACK NAME OF CF TEMPLATE>>>'
+MAKE_THESE_CERTS='["client1", "client2", "client3", "client4"]'
+#################
