@@ -1,0 +1,64 @@
+---
+Resources:
+  VPNUser:
+    Type: AWS::IAM::User
+    Properties:
+      Groups:
+        - !Ref VPNGroup
+      UserName: vpn_user
+  VPNGroup:
+    Type: AWS::IAM::Group
+    Properties:
+      GroupName: KJGVPNUsers
+      ManagedPolicyArns:
+        - !Ref VPNManagedPolicy
+  VPNUserKey:
+    Type: AWS::IAM::AccessKey
+    Properties:
+      Serial: 1
+      Status: Active
+      UserName: !Ref VPNUser
+  VPNManagedPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Policy to allow VPN User to update CloudFormation
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Sid: AllowCFDescribe
+            Action: 'cloudformation:DescribeStackInstance'
+            Effect: Allow
+            Resource: !ImportValue KJG-R53VPNStack
+          - Sid: AllowCFExport
+            Action: 'cloudformation:ListExports'
+            Effect: Allow
+            Resource: "*"
+          - Sid: AllowCFUpdate
+            Action: 'cloudformation:UpdateStack'
+            Effect: Allow
+            Resource: !ImportValue KJG-R53VPNStack
+          - Sid: AllowRouteList
+            Action: 'route53:ListHostedZones'
+            Effect: Allow
+            Resource: '*'
+          - Sid: AllowRouteChange
+            Action: 'route53:ChangeResourceRecordSets'
+            Effect: Allow
+            Resource: '*'
+          - Sid: GetRouteChange
+            Action: 'route53:GetChange'
+            Effect: Allow
+            Resource: '*'
+
+
+
+Outputs:
+  UserNameOutput:
+    Description: User Name of Generated Admin Account
+    Value: !Ref VPNUser
+  UserAccessKey:
+    Description: Access Key for Generated Admin Account
+    Value: !Ref VPNUserKey
+  UserSecretKey:
+    Description: Secret Access Key for Generated Admin Account
+    Value: !GetAtt VPNUserKey.SecretAccessKey

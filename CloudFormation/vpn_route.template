@@ -1,0 +1,38 @@
+---
+Resources:
+  vpnDNSRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneName: !Ref HostedZoneResource
+      Comment: DNS route for
+      Name: !Join
+        - '.'
+        - - !Ref RouteSubDomain
+          - !Ref HostedZoneResource
+      Type: A
+      TTL: '3000'
+      ResourceRecords:
+        - !Ref RouteTarget
+
+Parameters:
+  HostedZoneResource:
+    Type: String
+    Description: Hosted Zone Name
+  RouteSubDomain:
+    Type: String
+    Description: Sub domain for route
+  RouteTarget:
+    Type: String
+    Description: IPv4 A target for route
+
+Outputs:
+  StackARN:
+    Description: ARN of this stack
+    Value: !Ref AWS::StackId
+    Export:
+      Name: KJG-R53VPNStack
+  DestinationIP:
+    Description: Target of the DNS Route
+    Value: !Ref RouteTarget
+    Export:
+      Name: KJG-VPNTarget
